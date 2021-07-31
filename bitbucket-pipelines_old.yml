@@ -1,0 +1,52 @@
+image: php:7.4.7-fpm
+
+
+definitions:
+  services:
+      mysql:
+        image: mysql:5.7
+        environment:
+          MYSQL_DATABASE: 'homestead'
+          MYSQL_RANDOM_ROOT_PASSWORD: 'yes'
+          MYSQL_USER: 'homestead'
+          MYSQL_PASSWORD: 'secret'
+  steps:
+    - step: &Test-step
+        name: Run tests
+        caches:
+          - composer
+        script:
+           - apt-get update && apt-get install -qy git curl libmcrypt-dev mariadb-client && apt-get install -qy libjpeg-dev libpng-dev zip unzip libzip-dev
+           - docker-php-ext-install pdo_mysql zip
+           - docker-php-ext-configure gd --with-jpeg=/usr/include/
+           - docker-php-ext-install -j$(nproc) gd
+           - cp .env.pipeline .env
+           - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+           - composer install
+           - yes | php artisan migrate
+           - ./vendor/bin/phpunit
+        services:
+          - mysql
+    - step: &Deploy-Staging
+        name: Deploy to staging
+        deployment: staging
+        script:
+          - apt-get update && apt-get install -y ssh
+          - ssh $USER@$HOST "cd /home/$USER/$FOLDER && bash deploy.sh"
+    - step: &Deploy-Production
+            name: Deploy to production
+            deployment: production
+            script:
+              - apt-get update && apt-get install -y ssh
+              - ssh $USER@$HOST "cd /home/$USER/$FOLDER && bash deploy.sh"
+
+pipelines:
+  default:
+      - step: *Test-step
+  branches:
+      master:
+        - step: *Test-step
+        - step: *Deploy-Production
+      release/**:
+        - step: *Test-step
+        - step: *Deploy-Staging
